@@ -2,29 +2,30 @@
 
 import glob
 import zipfile
+import os
 
 # DOWNLOAD DATASETS
 # coswara cough zip FLAC dataset 
 print('Downloading COSWARA cough ZIP ...')
-!wget https://osf.io/67gfh/download -P /content/coswara_cough_download
+os.system('wget https://osf.io/67gfh/download -P /vol/bitbucket/hgc19/covid_cross_datasets/content/coswara_cough_download/')
 print('Downloading zip ... complete')
 # unzip dataset 
 print('Unzipping ... started')
-file_name = '/content/coswara_cough_download/download'
-extract_path = '/content/coswara/'
+file_name = '/vol/bitbucket/hgc19/covid_cross_datasets/content/coswara_cough_download/download'
+extract_path = '/vol/bitbucket/hgc19/covid_cross_datasets/content/coswara/'
 with zipfile.ZipFile(file_name) as file:
     file.extractall(path = extract_path)
 print('Unzipping ... complete')
 
 # epfl cough zip FLAC dataset 
 print('Downloading COSWARA cough ZIP ...')
-!wget https://osf.io/zasf3/download -P /content/epfl_cough_download
+os.system('wget https://osf.io/zasf3/download -P /vol/bitbucket/hgc19/covid_cross_datasets/content/epfl_cough_download/')
 print('Downloading zip ... complete')
 
 # unzip dataset 
 print('Unzipping ... started')
-file_name = '/content/epfl_cough_download/download'
-extract_path = '/content/epfl/'
+file_name = '/vol/bitbucket/hgc19/covid_cross_datasets/content/epfl_cough_download/download'
+extract_path = '/vol/bitbucket/hgc19/covid_cross_datasets/content/epfl/'
 with zipfile.ZipFile(file_name) as file:
     file.extractall(path = extract_path)
 print('Unzipping ... complete')
