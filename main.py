@@ -16,8 +16,8 @@ from tqdm import tqdm
 import argparse
 import matplotlib.pyplot as plt
 
-from conv_model_dicova import Conv_Model
-from data_preprocessing_dicova import COVID_dataset
+from model import Conv_Model
+from data_loader import COVID_dataset
 from utils.confusion_matrix import plot_confusion
 
 import warnings
@@ -30,18 +30,8 @@ def make_sample_weights(data_set, args):
     makes the weights for each of the classes
     '''
     data_set_metadata = data_set.metadata
-    if not args.compare_dataset:
-        covid_col_name = 'Covid_status'
-    else:
-        covid_col_name = 'label'
-    num_pos = data_set_metadata[covid_col_name].value_counts()[1]
-    num_neg = data_set_metadata[covid_col_name].value_counts()[0]
-
-    if hasattr(data_set, 'kdd_data') and args.weightsonKDD:
-        print(f'Cambridge dataset being used. num neg before: {num_neg} num pos before {num_pos}')
-        num_pos += data_set.kdd_data['Covid_status'].value_counts()[1]
-        num_neg += data_set.kdd_data['Covid_status'].value_counts()[0]
-        print(f'Cambridge dataset being used. num neg after: {num_neg} num pos after {num_pos}')
+    num_pos = data_set_metadata[1].value_counts()[1]
+    num_neg = data_set_metadata[1].value_counts()[0]
     pos_weight = num_neg/num_pos
     print('weight for covid', pos_weight)
     weights = torch.Tensor([pos_weight])
@@ -270,7 +260,6 @@ def main(args):
         feature_type=args.feature_type,
         repetitive_padding = args.repetitive_padding,
         scheduler=args.scheduler,
-        weightsonKDD=args.weightsonKDD,
         max_logit=args.max_logit,
         compare_dataset=args.compare_dataset
 
@@ -278,28 +267,27 @@ def main(args):
     # Init dir for saving models
     args.dirname = None
     if args.save_model_topk > 0 and not args.do_test:
-        existing = glob.glob('models/'+str(args.modality)+'/fold_'+str(args.fold_id)+'run_*')
+        existing = glob.glob('models/'+str(args.dataset)+'/run_*')
         idxs = [int(re.search(r"(?<=_)[0-9]+$", s).group(0)) for s in existing]
         ext = max(idxs) + 1 if idxs else 1
-        args.dirname = os.path.join(os.getcwd(), 'models', str(args.modality), 'fold_'+str(args.fold_id)+'run_'+str(ext))
+        args.dirname = os.path.join(os.getcwd(), 'models', str(args.dataset), 'run_'+str(ext))
         assert not os.path.exists(args.dirname), f"Dirname already exists:\nf{dirname}"
         os.mkdir(args.dirname)
         with open(os.path.join(args.dirname,'args.txt'), 'w') as f:
             json.dump(vars(args), f, indent=4)
 
     if args.logger == 'wandb' and not args.do_test:
-        run = wandb.init(project='DiCOVA_prelim'+args.modality,
+        run = wandb.init(project='cross_datasets'+args.dataset,
                          reinit=True,
                          config=hyp_params)
     transform_train = transforms.Compose([
         transforms.ToTensor(),
         AddGaussianNoise() if args.noise else NoneTransform(),
-        # transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
     ])
     transform_test = transforms.Compose([
         transforms.ToTensor(),
-        # transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
     ])
+
     # Train and dev split
     device = 'cuda'
 
@@ -307,7 +295,6 @@ def main(args):
     if not args.do_test:
         train_dataset = COVID_dataset(
             dset='train',
-            fold_id=args.fold_id,
             transform=transform_train,
             window_size=hyp_params["wsz"],
             n_fft=args.nfft,
@@ -320,46 +307,42 @@ def main(args):
             n_mfcc = args.n_mfcc,
             onset_sample_method = args.onset_sample_method,
             repetitive_padding=args.repetitive_padding,
-            compare_dataset=args.compare_dataset
+            dataset=args.dataset
         )
 
-        if not args.fold_id == 'all':
-            if not args.compare_dataset:
-                val_dset = 'val'
-            else:
-                val_dset = 'devel'
-            val_dataset = COVID_dataset(
-                dset=val_dset,
-                fold_id=args.fold_id,
-                transform=transform_test,
-                eval_type=args.eval_type,
-                window_size=hyp_params["wsz"],
-                n_fft=args.nfft,
-                sample_rate=args.sr,
-                modality=args.modality,
-                feature_type=args.feature_type,
-                n_mfcc = args.n_mfcc,
-                onset_sample_method = args.onset_sample_method,
-                repetitive_padding=args.repetitive_padding,
-                compare_dataset=args.compare_dataset
-            )
+
+        val_dataset = COVID_dataset(
+            dset='val',
+            transform=transform_test,
+            eval_type=args.eval_type,
+            window_size=hyp_params["wsz"],
+            n_fft=args.nfft,
+            sample_rate=args.sr,
+            modality=args.modality,
+            feature_type=args.feature_type,
+            n_mfcc = args.n_mfcc,
+            onset_sample_method = args.onset_sample_method,
+            repetitive_padding=args.repetitive_padding,
+            dataset=args.dataset
+        )
+
         print('length of training dataset', len(train_dataset.train_fold))
+        print('length of validation dataset', len(val_dataset.train_fold))
 
         batch_size = args.batch_size
         train_weight = make_sample_weights(train_dataset, args).to(device)
-        if not args.fold_id == 'all':
-            val_weight = make_sample_weights(val_dataset, args).to(device)
+        val_weight = make_sample_weights(val_dataset, args).to(device)
 
         loader_train = DataLoader(train_dataset,
                                 batch_size=batch_size,
                                 shuffle=True,
                                 num_workers=4)
         
-        if not args.fold_id == 'all':
-            loader_dev = DataLoader(val_dataset,
-                                    batch_size=batch_size if args.eval_type != 'maj_vote' else 1,
-                                    shuffle=True,
-                                    num_workers=4)
+
+        loader_dev = DataLoader(val_dataset,
+                                batch_size=batch_size if args.eval_type != 'maj_vote' else 1,
+                                shuffle=True,
+                                num_workers=4)
 
 
     # Model
@@ -378,7 +361,6 @@ def main(args):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print("Total number of parameters is: {}".format(params))
-    print(model)
 
 
     if args.scheduler:
@@ -395,16 +377,14 @@ def main(args):
         print('Loading saved model:', args.saved_model_dir)
 
     if args.max_logit:
-
         assert args.eval_type == 'maj_vote', 'taking the max of the votes only works if maj voting'
     if args.logger == 'wandb' and not args.do_test:
         wandb.watch(model)
     if args.do_train:
         for epoch in range(100):
             run_train(epoch, loader_train, model, device, optimizer, train_weight, args)
-            if not args.fold_id == 'all':
-                if epoch % args.n_epoch_val == 0:
-                    run_eval(epoch, loader_dev, model, device, val_weight, args)
+            if epoch % args.n_epoch_val == 0:
+                run_eval(epoch, loader_dev, model, device, val_weight, args)
             if args.scheduler:
                 if epoch % scheduler.T_max == 0:
                     print('Reset Scheduler')
@@ -430,7 +410,7 @@ def main(args):
             n_mfcc = args.n_mfcc,
             onset_sample_method = args.onset_sample_method,
             repetitive_padding=args.repetitive_padding,
-            compare_dataset=args.compare_dataset
+            dataset=args.dataset
         )
         loader_test = DataLoader(test_dataset,
                         batch_size=args.batch_size if args.eval_type != 'maj_vote' else 1,
@@ -491,7 +471,6 @@ def parse_args():
     parser.add_argument('--eval_type', type=str, help='Type of eval to run', choices=['beginning', 'random','maj_vote'], default='maj_vote')
     parser.add_argument('--saved_model_dir', type=str, help='Path to dir containing saved model.', default="")
     parser.add_argument('--scheduler', type=bool, default=False)
-    parser.add_argument('--weightsonKDD', type=bool, help='when also training on kdd do you calc weigths on kdd+dicova?', default=False)
     parser.add_argument('--max_logit', type=bool, help='when majority voting do you take the mean or the max logit for ROC-AUC?')
     parser.add_argument('--n_epoch_val', type=int, help='determine the validation run for every n epochs', default=1)
     # What task to do
@@ -523,7 +502,7 @@ def parse_args():
         # Combine current args with saved model params
         hparams = ["lr", "dropout", "depth_scale", "wsz", "nfft", "sr",
                      "feature_type", "n_mfcc", "onset_sample_method",
-                    "repetitive_padding", "scheduler", "weightsonKDD",
+                    "repetitive_padding", "scheduler",
                     "max_logit"]
         for k,v in saved_model_args.items():
             if k in hparams:
@@ -543,5 +522,10 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     np.random.seed(0)
     
+    # for the covid cross cultures paper we need to train on one dataset
+    # then choose the best model based on val set but then evaluate on the 
+    # other datasets test set!
+
+    main(args)
 
 
