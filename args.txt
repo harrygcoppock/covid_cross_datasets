@@ -23,6 +23,6 @@
     "repetitive_padding": true,
     "scheduler": true,
     "max_logit": false,
-    "dataset": "epfl"
+    "dataset": "compare"
 
  }

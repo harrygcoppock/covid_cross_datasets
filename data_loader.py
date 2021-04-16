@@ -31,17 +31,32 @@ class COVID_dataset(Dataset):
                  onset_sample_method=False,
                  repetitive_padding = False,
                  dataset='coswara'):
-        path = '/vol/bitbucket/hgc19/covid_cross_datasets/content'
-        file_path = os.path.join(path,
+        if dataset != 'compare':
+            path = '/vol/bitbucket/hgc19/covid_cross_datasets/content'
+            file_path = os.path.join(path,
                                 dataset,
                                 'splits',
                                 'list_'+str(dataset)+'_'+str(dset)+'.txt')
-        metadata = pd.read_csv(file_path, names=['file', 'label'], delimiter=' ')
+        else:
+            path = '/vol/bitbucket/hgc19/COMPARE_data/cough'
+            file_path = os.path.join(path,
+                                'lab',
+                                str(dset) + '.csv')
+
+    
+        metadata = pd.read_csv(file_path,
+                            names=['file', 'label'],
+                            delimiter=',' if dataset == 'compare' else ' ',
+                            skiprows=1 if dataset == 'compare' else False)
+        print(metadata)
         
         train_fold = metadata['file'].to_list()
         metadata = metadata.set_index('file')
 
-        self.audio_dir = os.path.join(path, dataset, 'cough')
+        if dataset != 'compare':
+            self.audio_dir = os.path.join(path, dataset, 'cough')
+        else:
+            self.audio_dir = os.path.join(path, 'wav')
         self.window_size = window_size * sample_rate
         self.sample_rate = sample_rate
         self.hop_length = hop_length
@@ -59,6 +74,7 @@ class COVID_dataset(Dataset):
         self.train_fold = train_fold
         self.metadata = metadata
         self.dset = dset
+        self.dataset = dataset
 
     
     def __len__(self):
@@ -96,13 +112,14 @@ class COVID_dataset(Dataset):
         # get path of chosen index
 
         audio_path = self.train_fold[index]
-
-        if self.metadata.loc[audio_path, 'label'] == 'p':
+        cov_pos = 'positive' if self.dataset == 'compare' else 'p'
+        cov_neg = 'negative' if self.dataset == 'compare' else 'n'
+        if self.metadata.loc[audio_path, 'label'] == cov_pos:
             label = 1
-        elif self.metadata.loc[audio_path, 'label'] == 'n':
+        elif self.metadata.loc[audio_path, 'label'] == cov_neg:
             label = 0
         else:
-            raise f"Error, {self.metadata.loc[audio_path, 1]} is not a valid category"
+            raise f"Error, {self.metadata.loc[audio_path, 'label']} is not a valid category"
 
         audio_path = os.path.join(self.audio_dir, audio_path)
         chunks = self.load_process(audio_path)
