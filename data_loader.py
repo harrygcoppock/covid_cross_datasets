@@ -6,7 +6,6 @@ import pandas as pd
 import librosa, librosa.display
 import numpy as np
 import matplotlib.pyplot as plt
-from create_csv import create_csv
 import random
 import re
 from itertools import cycle
@@ -37,9 +36,12 @@ class COVID_dataset(Dataset):
                                 dataset,
                                 'splits',
                                 'list_'+str(dataset)+'_'+str(dset)+'.txt')
-        metadata = pd.read_csv(file_path, header=None)
-        train_fold = metadata[0].to_list()
+        metadata = pd.read_csv(file_path, names=['file', 'label'], delimiter=' ')
+        
+        train_fold = metadata['file'].to_list()
+        metadata = metadata.set_index('file')
 
+        self.audio_dir = os.path.join(path, dataset, 'cough')
         self.window_size = window_size * sample_rate
         self.sample_rate = sample_rate
         self.hop_length = hop_length
@@ -54,6 +56,10 @@ class COVID_dataset(Dataset):
         self.onset_sample_method = onset_sample_method
         self.repetitive_padding = repetitive_padding
         self.path = path
+        self.train_fold = train_fold
+        self.metadata = metadata
+        self.dset = dset
+
     
     def __len__(self):
         return len(self.train_fold)
@@ -88,19 +94,19 @@ class COVID_dataset(Dataset):
     def __getitem__(self, index):
 
         # get path of chosen index
-        audio_name = self.train_fold[index]
-        covid_pos_rep = 'p'
-        covid_neg_rep = 'n'
 
-        if self.metadata.loc[audio_name, 1] == covid_pos_rep:
+        audio_path = self.train_fold[index]
+
+        if self.metadata.loc[audio_path, 'label'] == 'p':
             label = 1
-        elif self.metadata.loc[audio_name, 1] == covid_neg_rep:
+        elif self.metadata.loc[audio_path, 'label'] == 'n':
             label = 0
         else:
-            raise f"Error, {self.metadata.loc[audio_name, 1]} is not a valid category"
+            raise f"Error, {self.metadata.loc[audio_path, 1]} is not a valid category"
 
+        audio_path = os.path.join(self.audio_dir, audio_path)
         chunks = self.load_process(audio_path)
-        
+
         return chunks, label
 
 

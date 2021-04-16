@@ -30,8 +30,8 @@ def make_sample_weights(data_set, args):
     makes the weights for each of the classes
     '''
     data_set_metadata = data_set.metadata
-    num_pos = data_set_metadata[1].value_counts()[1]
-    num_neg = data_set_metadata[1].value_counts()[0]
+    num_pos = data_set_metadata['label'].value_counts()[1]
+    num_neg = data_set_metadata['label'].value_counts()[0]
     pos_weight = num_neg/num_pos
     print('weight for covid', pos_weight)
     weights = torch.Tensor([pos_weight])
@@ -70,16 +70,7 @@ def run_train(epoch, loader_train, model, device, optimizer, weight, args):
         if args.logger == 'wandb':
             wandb.log({"F1": score, "loss": loss.item()})
 
-        
-    if args.fold_id == 'all' and epoch % 10 == 0:
-        '''
-        when training on 'all' simply save the model every 10 epochs and we can evaluate them individually
-        '''
-        new_dirname = os.path.join(args.dirname, f"{epoch}")
-        os.mkdir(new_dirname)
-        save_model(model, new_dirname)
-        print(F"saving model {new_dirname}")
-        return
+    
 
 
 def eval(model, audio, label, device, criterion):
@@ -156,25 +147,15 @@ def run_eval(epoch, loader_test, model, device, weight, args, do_save_model=True
         fpr, tpr, _ = roc_curve(ys, logits_list)
         roc_auc = auc(fpr, tpr)
 
-        if args.do_test: ##alican: look here lastly
+        if args.do_test: 
             path = os.path.join(args.saved_model_dir, 'test_results_' + str(roc_auc) + '.txt')
             dir_words = args.saved_model_dir.split("/")
             txt_name = dir_words[3] + '_' + dir_words[-2] + '_' + dir_words[-1] + '_testAuc_' + str(roc_auc) + '.txt'
-            # I do not have permission to save to alicans's dir
-            if 'hgc19' in path and 'aa9120' in os.getcwd():
-                path = os.path.join('/vol/bitbucket/aa9120/Dicova_Imperial/models',  txt_name)
-                with open(path, 'w+') as f:
-                    for file_name, logit in zip(loader_test.iterable.dataset.train_fold, logits_list):
-                        f.write(f'{file_name} {logit}\n')
-                    if args.modality == "speechbreath":
-                        f.write(f'test roc_auc is: {roc_auc}\n')
-            else:
-                with open(path, 'w+') as f:
-                    for file_name, logit in zip(loader_test.iterable.dataset.train_fold, logits_list):
-                        f.write(f'{file_name} {logit}\n')
+            with open(path, 'w+') as f:
+                for file_name, logit in zip(loader_test.iterable.dataset.train_fold, logits_list):
+                    f.write(f'{file_name} {logit}\n')
 
-                    if args.modality == "speechbreath":
-                        f.write(f'test roc_auc is: {roc_auc}\n')
+                f.write(f'test roc_auc is: {roc_auc}\n')
 
             return
 
@@ -209,10 +190,10 @@ def run_eval(epoch, loader_test, model, device, weight, args, do_save_model=True
             wandb.log(outputs)
 
         # Save model if required
-        if args.dirname and args.do_train and do_save_model and epoch >= 20:
+        if args.dirname and args.do_train and do_save_model:
             roc_auc *= 100
             prevs = glob.glob(args.dirname+'/*F1*') + glob.glob(args.dirname+'/*AUC*')
-            new_dirname = os.path.join(args.dirname, f"{args.task}_AUC-{roc_auc:.3f}")
+            new_dirname = os.path.join(args.dirname, f"AUC-{roc_auc:.3f}")
             # Overwrite current worst if already k saved models and current model
             # better than an existing one
             if len(prevs) == args.save_model_topk:
@@ -252,16 +233,14 @@ def main(args):
         batch_size=args.batch_size,
         n_fft=args.nfft,
         sample_rate=args.sr,
-        task=args.task,
         modality=args.modality,
         n_mfcc=args.n_mfcc,
         onset_sample_method = args.onset_sample_method,
-        kdd = args.kdd,
         feature_type=args.feature_type,
         repetitive_padding = args.repetitive_padding,
         scheduler=args.scheduler,
         max_logit=args.max_logit,
-        compare_dataset=args.compare_dataset
+        dataset=args.dataset
 
     )
     # Init dir for saving models
@@ -302,7 +281,6 @@ def main(args):
             masking=args.masking,
             pitch_shift=args.pitch_shift,
             modality=args.modality,
-            kdd=args.kdd,
             feature_type=args.feature_type,
             n_mfcc = args.n_mfcc,
             onset_sample_method = args.onset_sample_method,
@@ -383,8 +361,8 @@ def main(args):
     if args.do_train:
         for epoch in range(100):
             run_train(epoch, loader_train, model, device, optimizer, train_weight, args)
-            if epoch % args.n_epoch_val == 0:
-                run_eval(epoch, loader_dev, model, device, val_weight, args)
+
+            run_eval(epoch, loader_dev, model, device, val_weight, args)
             if args.scheduler:
                 if epoch % scheduler.T_max == 0:
                     print('Reset Scheduler')
@@ -476,7 +454,7 @@ def parse_args():
     # What task to do
     parser.add_argument('--location', type=str, help='where is the data', default='bitbucket', choices=['bitbucket', 'hpc'])
     parser.add_argument('--modality', type=str, help='do we want to stack all the modalities together, if so how many are there?', default='cough')
-    parser.add_argument('--compare_dataset', type=bool, help='do you want to train on compare dataset?', default=False)
+    parser.add_argument('--dataset', type=bool, help='what dataset do you want to train on?', choices=["cosware", "epfl", "compare"])
 
     # Hack to use script with debugger by loading args from file
     if len(sys.argv) == 1:

@@ -1,5 +1,5 @@
 {
-    "lr": 0.00005,
+    "lr": 0.0001,
     "dropout": false,
     "depth_scale": 1,
     "batch_size": 24,
@@ -23,5 +23,6 @@
     "repetitive_padding": true,
     "scheduler": true,
     "max_logit": false,
+    "dataset": "epfl"
 
  }
