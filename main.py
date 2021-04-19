@@ -70,6 +70,15 @@ def run_train(epoch, loader_train, model, device, optimizer, weight, args):
         if args.logger == 'wandb':
             wandb.log({"F1": score, "loss": loss.item()})
 
+    if args.train_all and (epoch+1) % 10 == 0:
+        '''
+        when training on 'all' simply save the model every 10 epochs
+        '''
+        new_dirname = os.path.join(args.dirname, f"{epoch}")
+        os.mkdir(new_dirname)
+        save_model(model, new_dirname)
+        print(F"saving model {new_dirname}")
+
     
 
 
@@ -86,7 +95,7 @@ def eval(model, audio, label, device, criterion):
     return loss, predicts, predicts_soft
 
 
-def run_eval(epoch, loader_test, model, device, weight, args, do_save_model=True):
+def run_eval(epoch, loader_test, model, device, weight, args, do_save_model=True, dataset_to_test=None):
     model.eval()
     loader_test = tqdm(loader_test, position=0)
     criterion = nn.BCEWithLogitsLoss(pos_weight=weight)
@@ -148,7 +157,7 @@ def run_eval(epoch, loader_test, model, device, weight, args, do_save_model=True
         roc_auc = auc(fpr, tpr)
 
         if args.do_test: 
-            path = os.path.join(args.saved_model_dir, 'test_results_' + str(roc_auc) + '.txt')
+            path = os.path.join(args.saved_model_dir, 'test_results_' + str(dataset_to_test) + str(roc_auc) + '.txt')
             dir_words = args.saved_model_dir.split("/")
             txt_name = dir_words[3] + '_' + dir_words[-2] + '_' + dir_words[-1] + '_testAuc_' + str(roc_auc) + '.txt'
             with open(path, 'w+') as f:
@@ -240,12 +249,14 @@ def main(args):
         repetitive_padding = args.repetitive_padding,
         scheduler=args.scheduler,
         max_logit=args.max_logit,
-        dataset=args.dataset
+        dataset=args.dataset,
+        noise=args.noise,
+        train_all=args.train_all
 
     )
     # Init dir for saving models
     args.dirname = None
-    if args.save_model_topk > 0 and not args.do_test:
+    if args.save_model_topk > 0:
         existing = glob.glob('models/'+str(args.dataset)+'/run_*')
         idxs = [int(re.search(r"(?<=_)[0-9]+$", s).group(0)) for s in existing]
         ext = max(idxs) + 1 if idxs else 1
@@ -255,7 +266,7 @@ def main(args):
         with open(os.path.join(args.dirname,'args.txt'), 'w') as f:
             json.dump(vars(args), f, indent=4)
 
-    if args.logger == 'wandb' and not args.do_test:
+    if args.logger == 'wandb':
         run = wandb.init(project='cross_datasets'+args.dataset,
                          reinit=True,
                          config=hyp_params)
@@ -271,24 +282,23 @@ def main(args):
     device = 'cuda'
 
     print(args)
-    if not args.do_test:
-        train_dataset = COVID_dataset(
-            dset='train',
-            transform=transform_train,
-            window_size=hyp_params["wsz"],
-            n_fft=args.nfft,
-            sample_rate=args.sr,
-            masking=args.masking,
-            pitch_shift=args.pitch_shift,
-            modality=args.modality,
-            feature_type=args.feature_type,
-            n_mfcc = args.n_mfcc,
-            onset_sample_method = args.onset_sample_method,
-            repetitive_padding=args.repetitive_padding,
-            dataset=args.dataset
-        )
-
-
+    train_dataset = COVID_dataset(
+        dset='train' if not args.train_all else 'trainval',
+        transform=transform_train,
+        window_size=hyp_params["wsz"],
+        n_fft=args.nfft,
+        sample_rate=args.sr,
+        masking=args.masking,
+        pitch_shift=args.pitch_shift,
+        modality=args.modality,
+        feature_type=args.feature_type,
+        n_mfcc = args.n_mfcc,
+        onset_sample_method = args.onset_sample_method,
+        repetitive_padding=args.repetitive_padding,
+        dataset=args.dataset
+    )
+    print('length of training dataset', len(train_dataset.train_fold))
+    if not args.train_all:
         val_dataset = COVID_dataset(
             dset='val',
             transform=transform_test,
@@ -304,23 +314,24 @@ def main(args):
             dataset=args.dataset
         )
 
-        print('length of training dataset', len(train_dataset.train_fold))
+    
         print('length of validation dataset', len(val_dataset.train_fold))
-
-        batch_size = args.batch_size
-        train_weight = make_sample_weights(train_dataset, args).to(device)
         val_weight = make_sample_weights(val_dataset, args).to(device)
-
-        loader_train = DataLoader(train_dataset,
-                                batch_size=batch_size,
-                                shuffle=True,
-                                num_workers=4)
-        
-
         loader_dev = DataLoader(val_dataset,
-                                batch_size=batch_size if args.eval_type != 'maj_vote' else 1,
+                                batch_size=args.batch_size if args.eval_type != 'maj_vote' else 1,
                                 shuffle=True,
                                 num_workers=4)
+
+
+    train_weight = make_sample_weights(train_dataset, args).to(device)
+    
+
+    loader_train = DataLoader(train_dataset,
+                            batch_size=args.batch_size,
+                            shuffle=True,
+                            num_workers=4)
+    
+    
 
 
     # Model
@@ -361,8 +372,8 @@ def main(args):
     if args.do_train:
         for epoch in range(100):
             run_train(epoch, loader_train, model, device, optimizer, train_weight, args)
-
-            run_eval(epoch, loader_dev, model, device, val_weight, args)
+            if not args.train_all:
+                run_eval(epoch, loader_dev, model, device, val_weight, args)
             if args.scheduler:
                 if epoch % scheduler.T_max == 0:
                     print('Reset Scheduler')
@@ -375,26 +386,27 @@ def main(args):
                 scheduler.step()
     if args.do_test:
 
-        test_dataset = COVID_dataset(
-            dset='test',
-            fold_id=None,
-            transform=transform_test,
-            eval_type=args.eval_type,
-            window_size=hyp_params["wsz"],
-            n_fft=args.nfft,
-            sample_rate=args.sr,
-            modality=args.modality,
-            feature_type=args.feature_type,
-            n_mfcc = args.n_mfcc,
-            onset_sample_method = args.onset_sample_method,
-            repetitive_padding=args.repetitive_padding,
-            dataset=args.dataset
-        )
-        loader_test = DataLoader(test_dataset,
-                        batch_size=args.batch_size if args.eval_type != 'maj_vote' else 1,
-                        shuffle=False,
-                        num_workers=4)
-        run_eval(None, loader_test, model, device, None, args)
+        for dataset_to_test in ['compare', 'coswara', 'epfl']:
+
+            test_dataset = COVID_dataset(
+                dset='test',
+                transform=transform_test,
+                eval_type=args.eval_type,
+                window_size=hyp_params["wsz"],
+                n_fft=args.nfft,
+                sample_rate=args.sr,
+                modality=args.modality,
+                feature_type=args.feature_type,
+                n_mfcc = args.n_mfcc,
+                onset_sample_method = args.onset_sample_method,
+                repetitive_padding=args.repetitive_padding,
+                dataset=dataset_to_test
+            )
+            loader_test = DataLoader(test_dataset,
+                            batch_size=args.batch_size if args.eval_type != 'maj_vote' else 1,
+                            shuffle=False,
+                            num_workers=4)
+            run_eval(None, loader_test, model, device, None, args, dataset_to_test=dataset_to_test)
 
 
 
@@ -455,6 +467,7 @@ def parse_args():
     parser.add_argument('--location', type=str, help='where is the data', default='bitbucket', choices=['bitbucket', 'hpc'])
     parser.add_argument('--modality', type=str, help='do we want to stack all the modalities together, if so how many are there?', default='cough')
     parser.add_argument('--dataset', type=bool, help='what dataset do you want to train on?', choices=["cosware", "epfl", "compare"])
+    parser.add_argument('--train_all', type=bool, help='do you want to train on the combination of train and val?', default=False)
 
     # Hack to use script with debugger by loading args from file
     if len(sys.argv) == 1:

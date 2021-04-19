@@ -47,7 +47,7 @@ class COVID_dataset(Dataset):
         metadata = pd.read_csv(file_path,
                             names=['file', 'label'],
                             delimiter=',' if dataset == 'compare' else ' ',
-                            skiprows=1 if dataset == 'compare' else False)
+                            skiprows=1 if dataset == 'compare' else 0)
         print(metadata)
         
         train_fold = metadata['file'].to_list()
