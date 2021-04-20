@@ -25,7 +25,7 @@ warnings.filterwarnings("ignore")
 
 import wandb
 
-def make_sample_weights(data_set, args):
+def make_sample_weights(data_set):
     '''
     makes the weights for each of the classes
     '''
@@ -298,6 +298,13 @@ def main(args):
         dataset=args.dataset
     )
     print('length of training dataset', len(train_dataset.train_fold))
+    train_weight = make_sample_weights(train_dataset).to(device)
+    
+
+    loader_train = DataLoader(train_dataset,
+                            batch_size=args.batch_size,
+                            shuffle=True,
+                            num_workers=4)
     if not args.train_all:
         val_dataset = COVID_dataset(
             dset='val',
@@ -316,20 +323,14 @@ def main(args):
 
     
         print('length of validation dataset', len(val_dataset.train_fold))
-        val_weight = make_sample_weights(val_dataset, args).to(device)
+        val_weight = make_sample_weights(val_dataset).to(device)
         loader_dev = DataLoader(val_dataset,
                                 batch_size=args.batch_size if args.eval_type != 'maj_vote' else 1,
                                 shuffle=True,
                                 num_workers=4)
 
 
-    train_weight = make_sample_weights(train_dataset, args).to(device)
-    
 
-    loader_train = DataLoader(train_dataset,
-                            batch_size=args.batch_size,
-                            shuffle=True,
-                            num_workers=4)
     
     
 

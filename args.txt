@@ -6,7 +6,7 @@
     "wsz": 6,
     "nfft": 1024,
     "sr": 24000,
-    "logger": "wandb",
+    "logger": "default",
     "save_model_topk": 3,
     "do_train": true,
     "do_test": false,
@@ -17,13 +17,13 @@
     "location": "bitbucket",
     "saved_model_dir": "",
     "modality": "cough",
-    "feature_type": "mfcc",
+    "feature_type": "stft",
     "n_mfcc": 40,
     "onset_sample_method": false,
     "repetitive_padding": true,
     "scheduler": true,
     "max_logit": false,
-    "dataset": "compare",
-    "train_all": true,
+    "dataset": "epfl",
+    "train_all": true
 
  }

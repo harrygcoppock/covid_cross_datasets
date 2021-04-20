@@ -67,6 +67,7 @@ with open(job_file, 'w') as fh:
 
     fh.writelines("#!/bin/bash\n")
     fh.writelines(f"#SBATCH --job-name=audio.job\n")
+    fh.writelines(f"#SBATCH --gres=gpu:1")
     fh.writelines(f"#SBATCH --output={output_path}{case_number}.out\n")
     fh.writelines(f"#SBATCH --error={output_path}{case_number}.err\n")
     fh.writelines("#SBATCH --mail-type=ALL\n")
@@ -76,12 +77,12 @@ with open(job_file, 'w') as fh:
     fh.writelines("TERM=vt100\n")  # or TERM=xterm
     fh.writelines("/usr/bin/nvidia-smi\n")
     fh.writelines("uptime\n")
-    # fh.writelines(f"python {file_to_run}")
+
     fh.writelines(f"{file_to_run}")
 
 # if you have no preference on type of GPU
 subprocess.call(
-    f"(. {venv_path}bin/activate && sbatch -w cloud-vm-40-190 {job_file})",
+    f"(. {venv_path}bin/activate && sbatch -x sicklebill {job_file})",
     shell=True)
 
 # use -w name_of_gpu to specify type of gpu you want
