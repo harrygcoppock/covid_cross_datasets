@@ -9,12 +9,23 @@ import matplotlib.pyplot as plt
 import random
 import re
 from itertools import cycle
+'''
+TODO
+audio path when training on all 3 datasets
+add argument to arg parser
 
+'''
 
 class COVID_dataset(Dataset):
     '''
     Custom COVID dataset.
     '''
+    PATHS = {
+        'coswara':'/vol/bitbucket/hgc19/covid_cross_datasets/content/coswara/splits/list_coswara_{dset}.txt',
+        'epfl':'/vol/bitbucket/hgc19/covid_cross_datasets/content/epfl/splits/list_epfl_{dset}.txt',
+        'comapre': '/vol/bitbucket/hgc19/COMPARE_data/cough/lab/{dset}.csv'
+
+    }
     def __init__(self, dset,
                  eval_type='random',
                  transform=None,
@@ -31,17 +42,31 @@ class COVID_dataset(Dataset):
                  onset_sample_method=False,
                  repetitive_padding = False,
                  dataset='coswara'):
-        if dataset != 'compare':
+        if dataset == 'epfl' or dataset == 'coswara':
             path = '/vol/bitbucket/hgc19/covid_cross_datasets/content'
             file_path = os.path.join(path,
                                 dataset,
                                 'splits',
                                 'list_'+str(dataset)+'_'+str(dset)+'.txt')
-        else:
+            self.audio_dir = os.path.join(path, dataset, 'cough')
+        elif dataset == 'compare':
             path = '/vol/bitbucket/hgc19/COMPARE_data/cough'
             file_path = os.path.join(path,
                                 'lab',
                                 str(dset) + '.csv')
+            self.audio_dir = os.path.join(path, 'wav')
+
+        elif dataset == 'all':
+            li = []
+            for name, path in PATHS.items():
+                df = pd.read_csv(file_path,
+                            names=['file', 'label'],
+                            delimiter=',' if name == 'compare' else ' ',
+                            skiprows=1 if name == 'compare' else 0)
+                li.append(df)
+            metadata = pd.concat(li, axis=0, ignore_index=True)
+        else:
+            raise 'This should not happen, investigate!'
 
     
         metadata = pd.read_csv(file_path,
@@ -53,10 +78,6 @@ class COVID_dataset(Dataset):
         train_fold = metadata['file'].to_list()
         metadata = metadata.set_index('file')
 
-        if dataset != 'compare':
-            self.audio_dir = os.path.join(path, dataset, 'cough')
-        else:
-            self.audio_dir = os.path.join(path, 'wav')
         self.window_size = window_size * sample_rate
         self.sample_rate = sample_rate
         self.hop_length = hop_length
