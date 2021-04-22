@@ -23,8 +23,13 @@ class COVID_dataset(Dataset):
     PATHS = {
         'coswara':'/vol/bitbucket/hgc19/covid_cross_datasets/content/coswara/splits/list_coswara_{dset}.txt',
         'epfl':'/vol/bitbucket/hgc19/covid_cross_datasets/content/epfl/splits/list_epfl_{dset}.txt',
-        'comapre': '/vol/bitbucket/hgc19/COMPARE_data/cough/lab/{dset}.csv'
+        'compare': '/vol/bitbucket/hgc19/COMPARE_data/cough/lab/{dset}.csv'
 
+    }
+    DIRECTORIES = {
+        'coswara':'/vol/bitbucket/hgc19/covid_cross_datasets/content/coswara/cough/',
+        'epfl': '/vol/bitbucket/hgc19/covid_cross_datasets/content/epfl/cough/',
+        'compare': '/vol/bitbucket/hgc19/COMPARE_data/cough/wav/'
     }
     def __init__(self, dset,
                  eval_type='random',
@@ -58,22 +63,24 @@ class COVID_dataset(Dataset):
 
         elif dataset == 'all':
             li = []
-            for name, path in PATHS.items():
-                df = pd.read_csv(file_path,
+            for name, path in self.PATHS.items():
+                df = pd.read_csv(path.format(dset=dset),
                             names=['file', 'label'],
                             delimiter=',' if name == 'compare' else ' ',
                             skiprows=1 if name == 'compare' else 0)
+                df['dataset'] = name
                 li.append(df)
             metadata = pd.concat(li, axis=0, ignore_index=True)
         else:
             raise 'This should not happen, investigate!'
 
-    
-        metadata = pd.read_csv(file_path,
+        if not dataset == 'all':
+            metadata = pd.read_csv(file_path,
                             names=['file', 'label'],
                             delimiter=',' if dataset == 'compare' else ' ',
                             skiprows=1 if dataset == 'compare' else 0)
-        print(metadata)
+            metadata['dataset'] = dataset
+            
         
         train_fold = metadata['file'].to_list()
         metadata = metadata.set_index('file')
@@ -133,8 +140,8 @@ class COVID_dataset(Dataset):
         # get path of chosen index
 
         audio_path = self.train_fold[index]
-        cov_pos = 'positive' if self.dataset == 'compare' else 'p'
-        cov_neg = 'negative' if self.dataset == 'compare' else 'n'
+        cov_pos = 'positive' if self.metadata.loc[audio_path, 'dataset'] == 'compare' else 'p'
+        cov_neg = 'negative' if self.metadata.loc[audio_path, 'dataset'] == 'compare' else 'n'
         if self.metadata.loc[audio_path, 'label'] == cov_pos:
             label = 1
         elif self.metadata.loc[audio_path, 'label'] == cov_neg:
@@ -142,9 +149,8 @@ class COVID_dataset(Dataset):
         else:
             raise f"Error, {self.metadata.loc[audio_path, 'label']} is not a valid category"
 
-        audio_path = os.path.join(self.audio_dir, audio_path)
+        audio_path = os.path.join(self.DIRECTORIES[self.metadata.loc[audio_path, 'dataset']], audio_path)
         chunks = self.load_process(audio_path)
-
         return chunks, label
 
 
@@ -305,20 +311,13 @@ class COVID_dataset(Dataset):
 
 
 if __name__ == "__main__":
-    test_dataset = COVID_dataset('val', None)
-    for i in tqdm(range(len(test_dataset))):
-        sample, label = test_dataset[i]
+    from torch.utils.data import DataLoader
+    dataset = COVID_dataset(dset='trainval', dataset='all')
+    print(dataset.metadata)
+    loader_dev = DataLoader(dataset,
+                        batch_size=1,
+                        shuffle=True,
+                        num_workers=4)
 
-        plt.figure()
-        librosa.display.specshow(sample,
-                                sr=24000,
-                                hop_length=512)
-        plt.xlabel("Time")
-        plt.ylabel("Frequency")
-        plt.colorbar(format="%+2.0f dB")
-        plt.title("Spectrogram (dB)")
-        path_to_save = 'figs/log_spectrogram'+str(i)+'.png'
-        #plt.savefig(path_to_save)
-        plt.show()
-        plt.close()
-        print(sample.shape)
+    for i in tqdm(loader_dev):
+        print('*'*30)

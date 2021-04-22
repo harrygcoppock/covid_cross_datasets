@@ -6,16 +6,16 @@
     "wsz": 6,
     "nfft": 1024,
     "sr": 24000,
-    "logger": "default",
+    "logger": "wandb",
     "save_model_topk": 3,
-    "do_train": false,
-    "do_test": true,
+    "do_train": true,
+    "do_test": false,
     "eval_type": "maj_vote",
-    "noise": false,
+    "noise": true,
     "masking": true,
     "pitch_shift": true,
     "location": "bitbucket",
-    "saved_model_dir": "/vol/bitbucket/hgc19/covid_cross_datasets/models/epfl/run_16/89",
+    "saved_model_dir": "",
     "modality": "cough",
     "feature_type": "stft",
     "n_mfcc": 40,
@@ -23,7 +23,7 @@
     "repetitive_padding": true,
     "scheduler": true,
     "max_logit": false,
-    "dataset": "epfl",
-    "train_all": true
+    "dataset": "all",
+    "train_all": false
 
  }
