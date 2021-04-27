@@ -8,14 +8,14 @@
     "sr": 24000,
     "logger": "wandb",
     "save_model_topk": 3,
-    "do_train": true,
-    "do_test": false,
+    "do_train": false,
+    "do_test": true,
     "eval_type": "maj_vote",
     "noise": true,
     "masking": true,
     "pitch_shift": true,
     "location": "bitbucket",
-    "saved_model_dir": "",
+    "saved_model_dir": "/vol/bitbucket/hgc19/covid_cross_datasets/models/all/run_10/249",
     "modality": "cough",
     "feature_type": "stft",
     "n_mfcc": 40,
@@ -24,6 +24,6 @@
     "scheduler": true,
     "max_logit": false,
     "dataset": "all",
-    "train_all": false
+    "train_all": true
 
  }

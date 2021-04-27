@@ -371,7 +371,7 @@ def main(args):
     if args.logger == 'wandb' and not args.do_test:
         wandb.watch(model)
     if args.do_train:
-        for epoch in range(100):
+        for epoch in range(400):
             run_train(epoch, loader_train, model, device, optimizer, train_weight, args)
             if not args.train_all:
                 run_eval(epoch, loader_dev, model, device, val_weight, args)
