@@ -4,15 +4,26 @@ import glob
 import pickle
 import librosa
 import zipfile
+import json
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import auc
+import librosa
+import tqdm
+from sklearn.metrics import auc, roc_curve
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.ensemble import GradientBoostingClassifier
+
+
+from multiprocessing import Pool
+from functools import partial
+
+
+from DiCOVA_baseline.feature_extraction import read_audio
+
 sns.set() # Use seaborn's default style to make attractive graphs
 sns.set_style("white")
 sns.set_style("ticks")
@@ -46,14 +57,14 @@ def file_paths(split, dataset):
   for name, path in PATHS.items():
     if name not in dataset:
       continue
-      df = pd.read_csv(path.format(dset=split),
-                  names=['file', 'label'],
-                  delimiter=',' if name == 'compare' else ' ',
-                  skiprows=1 if name == 'compare' else 0)
-      df['dataset'] = name
-      li.append(df)
+    df = pd.read_csv(path.format(dset=split),
+                names=['file', 'label'],
+                delimiter=',' if name == 'compare' else ' ',
+                skiprows=1 if name == 'compare' else 0)
+    df['dataset'] = name
+    li.append(df)
   metadata = pd.concat(li, axis=0, ignore_index=True)
-  metadata.set_index('file')
+  metadata = metadata.set_index('file')
   return metadata
 
 def return_label(file_list, audio_path):
@@ -73,11 +84,49 @@ def return_label(file_list, audio_path):
 
 def load_audio(path):
   '''
-  given a path to an audio file, load it as a numpy array
+  given a path to an audio file, extract features and load it as a numpy array
   '''
-  file_data = open(path,'rb')
-  data = pickle.load(file_data)
-  return data.values
+  # signal, sample_rate = librosa.load(path, sr=48000)
+  s = read_audio(path, 48000)
+  sad = compute_SAD(s)
+  ind = np.where(sad==1)
+  s = s[ind]
+  F = librosa.feature.mfcc(s,sr=44100,
+              n_mfcc=39,
+              n_fft=1024,
+              hop_length=441,
+              n_mels=64,
+              fmax=22050)
+
+  features = np.array(F)
+  return features.T
+
+def compute_SAD(sig):
+	# Speech activity detection based on sample thresholding
+	# Expects a normalized waveform as input
+	# Uses a margin of at the boundary
+    fs = 44100
+    sad_thres = 0.0001
+    sad_start_end_sil_length = int(20*1e-3*fs)
+    sad_margin_length = int(50*1e-3*fs)
+
+    sample_activity = np.zeros(sig.shape)
+    sample_activity[np.power(sig,2)>sad_thres] = 1
+    sad = np.zeros(sig.shape)
+    for i in range(len(sample_activity)):
+        if sample_activity[i] == 1:
+            sad[i-sad_margin_length:i+sad_margin_length] = 1
+    sad[0:sad_start_end_sil_length] = 0
+    sad[-sad_start_end_sil_length:] = 0
+    return sad
+
+def paralise(file_list, i):
+  label = return_label(file_list, i)
+  audio_path = os.path.join(DIRECTORIES[file_list.loc[i, 'dataset']], i)
+  data = load_audio(audio_path)
+
+  rep = np.concatenate((data, np.array([label]*data.shape[0]).reshape(data.shape[0], 1)), axis=1)
+  return rep[:,:-1], rep[:,-1]
 
 def load_data(file_list):
   '''
@@ -85,161 +134,47 @@ def load_data(file_list):
   '''
   data = []
   labels = []
-  for i in file_list['file']:
-    labels.append(load_data(file_list, i))
-    audio_path = os.path.join(DIRECTORIES[file_list.loc[i, 'dataset']], audio_path)
-    data.append(load_audio(audio_path))
+  pool = Pool()
+  func = partial(paralise, file_list)
+  data, labels = zip(*pool.map(func, file_list.index))
+
+  # for i in file_list.index:
+  #   labels.append(return_label(file_list, i))
+  #   audio_path = os.path.join(DIRECTORIES[file_list.loc[i, 'dataset']], i)
+  #   data.append(load_audio(audio_path))
   
-  return np.stack(data), np.stack(labels)
+  return np.vstack(data), np.vstack(labels)
 
 
-    scale = StandardScaler().fit(train_X[dataset_type])
-    train_X_stand = scale.transform(train_X[dataset_type])
-    # clf = RandomForestClassifier(max_depth=6, random_state=0, criterion='gini').fit(train_X_stand, train_Y[dataset_type])
-    clf = RandomForestClassifier(max_depth=24, n_estimators=257, criterion='entropy', random_state=0, n_jobs=-1).fit(train_X_stand, train_Y[dataset_type])
-    # clf = RandomForestClassifier(max_depth=24, min_samples_leaf=3, n_estimators=40, max_features=0.5, n_jobs=-1, oob_score=True, random_state=0).fit(train_X[dataset_type], train_Y[dataset_type])
-    for key in dataset_types:
-      val_X_stand = scale.transform(val_X[key])
-      output_scores = clf.predict_proba(val_X_stand)[:,1]
-      tp, fp = compute_tp_fp(output_scores, val_Y[key])
-      val_auc[dataset_type+'_'+key] = auc(fp, tp)
-      loop_val_auc[iter][i].append(val_auc[dataset_type+'_'+key])
-    i = i + 1
+def main(dataset):
+  '''
+  given dataset name, train on this dataset and evaluate on all 3 tests
+  input:
+  dataset: list of names of datasets
+  '''
+  print('***Loading Features***')
+  train_paths = file_paths('trainval', dataset)
+  train_X, train_Y = load_data(train_paths)
+  print('***Training Forest***')
+  scale = StandardScaler().fit(train_X)
+  train_X_stand = scale.transform(train_X)
+  clf = RandomForestClassifier(max_depth=24, n_estimators=257, criterion='entropy', random_state=0, n_jobs=-1).fit(train_X_stand, train_Y)
+  print('***Testing Forest***')
+  scores = {}
+  for test_dataset in tqdm(PATHS.keys()):
+    test_paths = file_paths('test', test_dataset)
+    test_X, test_Y = load_data(test_paths)
+    test_X_stand = scale.transform(test_X)
+    output_scores = clf.predict_proba(test_X_stand)[:,1]
 
-  # pooled evaluation
-  train_X_all = np.vstack((train_X['cambridge'], train_X['dicova'], train_X['epfl']))
-  train_Y_all = np.hstack((train_Y['cambridge'], train_Y['dicova'], train_Y['epfl']))
-
-  loop_val_auc[iter].append([])
-  scale = StandardScaler().fit(train_X_all)
-  train_X_stand = scale.transform(train_X_all)
-  clf = RandomForestClassifier(max_depth=24, n_estimators=257, criterion='entropy', random_state=0, n_jobs=-1).fit(train_X_stand, train_Y_all)
-  for key in dataset_types:
-    val_X_stand = scale.transform(val_X[key])
-    output_scores = clf.predict_proba(val_X_stand)[:,1]
-    tp, fp = compute_tp_fp(output_scores, val_Y[key])
-    val_auc['pooled'+'_'+key] = auc(fp, tp)
-    loop_val_auc[iter][i].append(val_auc['pooled'+'_'+key])
-
-# to train a system on cambridge and test on the cambridge only
-dataset_type = 'cambridge'
-train_X = {}
-train_Y = {}
-
-val_X = {}
-val_Y = {}
-
-train_X[dataset_type], val_X[dataset_type], train_Y[dataset_type], val_Y[dataset_type] = \
-            make_train_val_split(dataset_type, file_list)
-scale = StandardScaler().fit(train_X[dataset_type])
-train_X_stand = scale.transform(train_X[dataset_type])
-clf = RandomForestClassifier(max_depth=24, n_estimators=257, criterion='entropy', random_state=0, n_jobs=-1).fit(train_X_stand, train_Y[dataset_type])
-
-test_X_stand = scale.transform(test_X)
-output_scores = clf.predict_proba(test_X_stand)[:,1]
-
-plt.plot(output_scores)
-
-plt.plot(output_scores)
-
-plt.plot(output_scores)
-
-df = {}
-df['filename'] = []
-df['prediction'] = []
-thres = 0.3
-for i in range(len(output_scores)):
-  df['filename'].append(test_list[i].split('/')[-1].split('.p')[0])
-  if output_scores[i] >thres:
-    df['prediction'].append('positive')
-  else:
-    df['prediction'].append('negative')
-
-new = pd.DataFrame.from_dict(df)
-new_1 = new.sort_values(by = 'filename')
-new_1.to_csv("cambridge_test_scores.csv", index=False)
-
-new_1
-
-# plot decisions at 80% sensitivity
-temp = np.array(loop_val_auc)
-fig = plt.subplots(figsize=(7,6.5))
-ax = plt.subplot(1,1,1)
-sns.set(font_scale=1.0)#for label size
-FS = 12
-x_label = ['D-1', 'D-2','D-3']
-y_label = ['D-1', 'D-2', 'D-3', 'D-All']
-
-sns.heatmap(np.mean(temp,axis=0)*100, annot=True, fmt='.3g', cmap='Blues', annot_kws={"size": 16},\
-            cbar_kws={'label': 'AVG. AUC'})# font size
-ax.set_xticks(np.arange(len(x_label))+.5)
-ax.set_yticks(np.arange(len(y_label))+.5)
-ax.set_xticklabels(x_label,rotation=0,fontsize=FS)
-ax.set_yticklabels(y_label,rotation=90,fontsize=FS)
-ax.figure.savefig("avg_auc.pdf", bbox_inches='tight')
-plt.show()
-sns.set() # Use seaborn's default style to make attractive graphs
-sns.set_style("white")
-sns.set_style("ticks")
-
-# plot decisions at 80% sensitivity
-temp = np.array(loop_val_auc)
-fig = plt.subplots(figsize=(7,6.5))
-ax = plt.subplot(1,1,1)
-sns.set(font_scale=1.0)#for label size
-FS = 12
-x_label = ['D-1', 'D-2','D-3']
-y_label = ['D-1', 'D-2', 'D-3', 'D-All']
-
-sns.heatmap(np.std(temp,axis=0)*100, annot=True, fmt='.3g', cmap='Blues', annot_kws={"size": 16},\
-            cbar_kws={'label': 'AVG. AUC'})# font size
-ax.set_xticks(np.arange(len(x_label))+.5)
-ax.set_yticks(np.arange(len(y_label))+.5)
-ax.set_xticklabels(x_label,rotation=0,fontsize=FS)
-ax.set_yticklabels(y_label,rotation=90,fontsize=FS)
-ax.figure.savefig("avg_auc.pdf", bbox_inches='tight')
-plt.show()
-sns.set() # Use seaborn's default style to make attractive graphs
-sns.set_style("white")
-sns.set_style("ticks")
-
-# train and cross-evaluate across datasets
-val_auc = {}
-for dataset_type in dataset_types:
-  scale = StandardScaler().fit(train_X[dataset_type])
-  train_X_stand = scale.transform(train_X[dataset_type])
-  # clf = RandomForestClassifier(max_depth=6, random_state=0, criterion='gini').fit(train_X_stand, train_Y[dataset_type])
-  clf = RandomForestClassifier(max_depth=24, n_estimators=257, criterion='entropy', random_state=0).fit(train_X_stand, train_Y[dataset_type])
-  # clf = RandomForestClassifier(max_depth=24, min_samples_leaf=3, n_estimators=40, max_features=0.5, n_jobs=-1, oob_score=True, random_state=0).fit(train_X[dataset_type], train_Y[dataset_type])
-  for key in dataset_types:
-    val_X_stand = scale.transform(val_X[key])
-    output_scores = clf.predict_proba(val_X_stand)[:,1]
-    tp, fp = compute_tp_fp(output_scores, val_Y[key])
-    val_auc[dataset_type+'_'+key] = auc(fp, tp)
-
-# pooled evaluation
-train_X_all = np.vstack((train_X['cambridge'], train_X['dicova'], train_X['epfl']))
-train_Y_all = np.hstack((train_Y['cambridge'], train_Y['dicova'], train_Y['epfl']))
-
-train_X_stand = scale.transform(train_X_all)
-clf = RandomForestClassifier(max_depth=24, n_estimators=257, criterion='entropy', random_state=0).fit(train_X_stand, train_Y_all)
-for key in dataset_types:
-  val_X_stand = scale.transform(val_X[key])
-  output_scores = clf.predict_proba(val_X_stand)[:,1]
-  tp, fp = compute_tp_fp(output_scores, val_Y[key])
-  val_auc['pooled'+'_'+key] = auc(fp, tp)
-
-for i in range(4):
-  for j in range(3):
-
-val_auc
-
-val_auc
-
-plt.plot(clf.feature_importances_)
-
-plt.plot(clf.feature_importances_)
+    fpr, tpr, _ = roc_curve(test_Y, output_scores)
+    roc_auc = auc(fpr, tpr)
+    scores[test_dataset] = roc_auc
+    score_name = dataset+test_dataset+'scores.txt'
+    with open(score_name, 'w') as file:
+     file.write(json.dumps(scores))
+  
 
 
-
-https://osf.io/k8t23/download
+if __name__ == '__main__':
+  main('coswara')

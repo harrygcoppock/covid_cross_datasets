@@ -1,0 +1,23 @@
+
+Below we list the dependencies of the baseline system software.
+
+1. Python dependencies:
+-	python 3.8.3
+-	sklearn 0.23.1
+-  	librosa 0.8.0
+-	Numpy 1.18.5
+-	Pickle 4.0
+-	argparse 1.1
+-	configparser 
+-	matplotlib 3.2.2
+
+2. Dataset dependencies:
+- ../DiCOVA_Train_Val_Data_Release
+
+3. Operating system
+- Linux, MAC, Windows
+
+Code front-end is a command-line interface which can be run using shell (terminal).
+In case you are not familiar with shell, you can run each python file seprately.
+
+#############################################################################################
