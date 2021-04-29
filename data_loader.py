@@ -9,12 +9,7 @@ import matplotlib.pyplot as plt
 import random
 import re
 from itertools import cycle
-'''
-TODO
-audio path when training on all 3 datasets
-add argument to arg parser
 
-'''
 
 class COVID_dataset(Dataset):
     '''
