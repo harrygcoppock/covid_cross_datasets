@@ -10,7 +10,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import librosa
-import tqdm
+from tqdm import tqdm
 from sklearn.metrics import auc, roc_curve
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
@@ -55,7 +55,7 @@ def file_paths(split, dataset):
   '''
   li = []
   for name, path in PATHS.items():
-    if name not in dataset:
+    if name != dataset and dataset != 'all':
       continue
     df = pd.read_csv(path.format(dset=split),
                 names=['file', 'label'],
@@ -65,6 +65,7 @@ def file_paths(split, dataset):
     li.append(df)
   metadata = pd.concat(li, axis=0, ignore_index=True)
   metadata = metadata.set_index('file')
+  print(f'length of {dataset}: {len(metadata)}')
   return metadata
 
 def return_label(file_list, audio_path):
@@ -142,8 +143,8 @@ def load_data(file_list):
   #   labels.append(return_label(file_list, i))
   #   audio_path = os.path.join(DIRECTORIES[file_list.loc[i, 'dataset']], i)
   #   data.append(load_audio(audio_path))
-  
-  return np.vstack(data), np.vstack(labels)
+
+  return np.concatenate(data, axis=0), np.concatenate(labels, axis=0)
 
 
 def main(dataset):
@@ -163,18 +164,31 @@ def main(dataset):
   scores = {}
   for test_dataset in tqdm(PATHS.keys()):
     test_paths = file_paths('test', test_dataset)
-    test_X, test_Y = load_data(test_paths)
-    test_X_stand = scale.transform(test_X)
-    output_scores = clf.predict_proba(test_X_stand)[:,1]
+    all_probs = []
+    all_labels = []
+    for i in test_paths.index:
+      test_X, test_Y = paralise(test_paths, i)
+      test_X_stand = scale.transform(test_X)
+      output_probs = clf.predict_proba(test_X_stand)[:,1]
+      output_prob = np.mean(output_probs)
+      all_probs.append(output_prob)
+      all_labels.append(test_Y[0])
+  
+    fpr, tpr, _ = roc_curve(all_labels, all_probs)
 
-    fpr, tpr, _ = roc_curve(test_Y, output_scores)
+    # test_X, test_Y = load_data(test_paths)
+    # test_X_stand = scale.transform(test_X)
+    # output_scores = clf.predict_proba(test_X_stand)[:,1]
+
+    # fpr, tpr, _ = roc_curve(test_Y, output_scores)
     roc_auc = auc(fpr, tpr)
     scores[test_dataset] = roc_auc
-    score_name = dataset+test_dataset+'scores.txt'
-    with open(score_name, 'w') as file:
+  score_name = dataset+'scores4.txt'
+  with open(score_name, 'w') as file:
      file.write(json.dumps(scores))
   
 
 
 if __name__ == '__main__':
-  main('coswara')
+  for i in ['epfl', 'coswara', 'compare', 'all']:
+    main(i)
